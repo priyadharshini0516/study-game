@@ -3,89 +3,73 @@ import mediapipe as mp
 import random
 import time
 
-# Initialize Mediapipe Hands
+# Mediapipe setup
 mp_hands = mp.solutions.hands
-mp_draw = mp.solutions.drawing_utils
+mp_drawing = mp.solutions.drawing_utils
 hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+
+# Finger tip landmark indices
+FINGER_TIPS = [4, 8, 12, 16, 20]
 
 # Generate random math question
 def generate_question():
-    a = random.randint(1, 5)
-    b = random.randint(1, 5)
-    return a, b, a + b
+    a, b = random.randint(1, 5), random.randint(1, 5)
+    return f"{a} + {b}", a + b
 
-# Count raised fingers
-def count_fingers(hand_landmarks):
-    tip_ids = [4, 8, 12, 16, 20]  # Thumb, Index, Middle, Ring, Pinky
-    fingers = []
+# Count fingers (only one hand)
+def count_fingers(hand_landmarks, img_height, img_width):
+    count = 0
+    for tip in FINGER_TIPS:
+        tip_y = hand_landmarks.landmark[tip].y * img_height
+        pip_y = hand_landmarks.landmark[tip - 2].y * img_height
+        if tip != 4:  # all fingers except thumb
+            if tip_y < pip_y:
+                count += 1
+        else:  # Thumb logic
+            tip_x = hand_landmarks.landmark[tip].x * img_width
+            pip_x = hand_landmarks.landmark[tip - 2].x * img_width
+            if tip_x > pip_x:  # right hand
+                count += 1
+    return count
 
-    # Thumb
-    if hand_landmarks.landmark[tip_ids[0]].x < hand_landmarks.landmark[tip_ids[0] - 1].x:
-        fingers.append(1)
-    else:
-        fingers.append(0)
-
-    # Other fingers
-    for id in range(1, 5):
-        if hand_landmarks.landmark[tip_ids[id]].y < hand_landmarks.landmark[tip_ids[id] - 2].y:
-            fingers.append(1)
-        else:
-            fingers.append(0)
-
-    return fingers.count(1)
-
-# Initialize camera
+# Game loop
 cap = cv2.VideoCapture(0)
+question, answer = generate_question()
+last_check = time.time()
+feedback = ""
 
-score = 0
-a, b, answer = generate_question()
-last_answer_time = time.time()
-
-while True:
-    ret, frame = cap.read()
-    if not ret:
+while cap.isOpened():
+    success, frame = cap.read()
+    if not success:
         break
 
-    frame = cv2.flip(frame, 1)  # Mirror view
-    h, w, c = frame.shape
+    frame = cv2.flip(frame, 1)
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    # Process with Mediapipe
     result = hands.process(rgb)
 
     if result.multi_hand_landmarks:
-        for hand_landmarks in result.multi_hand_landmarks:
-            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+        hand_landmarks = result.multi_hand_landmarks[0]  # Only first hand
+        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+        h, w, _ = frame.shape
+        fingers = count_fingers(hand_landmarks, h, w)
 
-            # Count fingers
-            finger_count = count_fingers(hand_landmarks)
+        if time.time() - last_check > 2:
+            if fingers == answer:
+                feedback = "✅ Correct!"
+                question, answer = generate_question()
+            else:
+                feedback = f"❌ Try again ({fingers})"
+            last_check = time.time()
 
-            # Display detected answer
-            cv2.putText(frame, f"Your Answer: {finger_count}", (10, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+    # Show question and feedback
+    cv2.putText(frame, f"Question: {question}", (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+    cv2.putText(frame, feedback, (50, 100),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0) if "Correct" in feedback else (0, 0, 255), 2)
 
-            # Check correctness every 2 seconds
-            if time.time() - last_answer_time > 2:
-                if finger_count == answer:
-                    score += 1
-                    cv2.putText(frame, "Correct!", (200, 250),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-                    a, b, answer = generate_question()
-                else:
-                    cv2.putText(frame, "Wrong!", (200, 250),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
-                last_answer_time = time.time()
+    cv2.imshow("Math with Fingers (One Hand)", frame)
 
-    # Show question and score
-    cv2.putText(frame, f"Q: {a} + {b} = ?", (10, 100),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-    cv2.putText(frame, f"Score: {score}", (10, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-    cv2.imshow("Math with Fingers Game", frame)
-
-    # Quit when 'q' is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(5) & 0xFF == 27:  # ESC to quit
         break
 
 cap.release()
