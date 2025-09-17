@@ -29,8 +29,11 @@ def count_fingers(hand_landmarks, img_height, img_width):
 
 # Generate random math question
 def generate_question(max_num):
-    a, b = random.randint(1, max_num), random.randint(1, max_num)
-    return f"{a} + {b}", a + b
+    while True:
+        a, b = random.randint(1, max_num), random.randint(1, max_num)
+        if a + b <= 10:   # ✅ only allow answers you can show with fingers
+            return f"{a} + {b}", a + b
+
 
 # Game loop
 cap = cv2.VideoCapture(0)
